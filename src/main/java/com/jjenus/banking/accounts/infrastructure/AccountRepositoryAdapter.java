@@ -19,6 +19,17 @@ import java.util.stream.Collectors;
  *
  * <p>This class is the only place in the codebase where domain objects are
  * converted to/from JPA entities for accounts.
+ *
+ * <p><b>Important:</b> bank-core's {@code Account.customerId()} stores the
+ * Keycloak owner ID (not a display name) so that
+ * {@link #findByCustomerId(String)} correctly resolves "my accounts" queries.
+ * The human-readable owner name is set separately via
+ * {@link AccountOwnerDirectory} immediately after {@link #save(Account)} is
+ * called by {@code AccountApplicationService.openAccount()} — it is never
+ * derived from the domain object here. On {@link #save(Account)}, the
+ * {@code owner_name} column is initialised to the owner ID as a safe
+ * placeholder until {@code AccountOwnerDirectory.recordOwnerName()} overwrites
+ * it in the same transaction.
  */
 @Repository
 class AccountRepositoryAdapter implements AccountRepository {
@@ -42,6 +53,9 @@ class AccountRepositoryAdapter implements AccountRepository {
             .orElseThrow(() -> new IllegalArgumentException(
                 "Account not found for update: " + account.id().value()));
 
+        // owner_name is intentionally NOT touched here — it is independent
+        // JPA-layer metadata managed by AccountOwnerDirectory, not part of
+        // the bank-core domain object being persisted.
         entity.setBalance(account.balance().amount());
         entity.setStatus(account.status().name());
         entity.setVersion(account.version());
@@ -78,8 +92,10 @@ class AccountRepositoryAdapter implements AccountRepository {
     private AccountJpaEntity toEntity(Account account) {
         return new AccountJpaEntity(
             account.id().value(),
-            account.customerId(),         // ownerId = Keycloak sub passed as customerId
-            account.customerId(),         // ownerName — set properly by AccountApplicationService
+            account.customerId(),         // ownerId = Keycloak sub
+            account.customerId(),         // owner_name placeholder — overwritten by
+                                           // AccountOwnerDirectory.recordOwnerName() in the
+                                           // same transaction during account creation
             account.balance().amount(),
             account.balance().currency().getCurrencyCode(),
             account.status().name(),

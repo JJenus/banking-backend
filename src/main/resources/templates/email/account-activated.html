@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" th:replace="email/_base :: layout(~{::content})">
+<body>
+<th:block th:ref="content">
+  <div th:fragment="content">
+    <h1 style="font-size:20px; margin:0 0 16px; color:#15803d;">Your account is active again</h1>
+    <p style="margin:0 0 16px;">
+      Account <span style="font-family:monospace;" th:text="${accountId}">ACC-XXXXXXXXXX</span>
+      has been reactivated. You can now deposit, withdraw, and transfer as normal.
+    </p>
+  </div>
+</th:block>
+</body>
+</html>

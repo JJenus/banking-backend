@@ -4,13 +4,15 @@ import com.jjenus.bank.core.accounts.*;
 import com.jjenus.bank.core.ports.AccountRepository;
 import com.jjenus.bank.core.shared.Money;
 import com.jjenus.bank.core.shared.Result;
+import com.jjenus.banking.accounts.AccountQueryApi;
+import com.jjenus.banking.accounts.infrastructure.AccountOwnerDirectory;
 import com.jjenus.banking.shared.exception.ResourceNotFoundException;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Currency;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Application service for account operations.
@@ -20,32 +22,53 @@ import java.util.List;
  *
  * <p>Every method is transactional. Domain events are published <em>after</em>
  * the transaction commits via Spring Modulith's transactional event support.
+ *
+ * <p>Also implements {@link AccountQueryApi} — the public interface other
+ * modules use to query account data without crossing module boundaries.
+ *
+ * <p><b>Owner ID vs owner name:</b> bank-core's {@code Account.customerId()} is a
+ * single string field. This application maps it to the Keycloak {@code sub}
+ * (the stable owner ID), since that's what's needed for "find my accounts"
+ * queries and for resolving notification recipients. The human-readable owner
+ * name is tracked separately by {@link AccountOwnerDirectory} in the
+ * infrastructure layer — it is metadata for display purposes only and never
+ * flows through bank-core.
  */
 @Service
 @Transactional
-public class AccountApplicationService {
+public class AccountApplicationService implements AccountQueryApi {
 
     private final AccountRepository accountRepository;
+    private final AccountOwnerDirectory ownerDirectory;
     private final ApplicationEventPublisher eventPublisher;
 
     public AccountApplicationService(AccountRepository accountRepository,
+                                     AccountOwnerDirectory ownerDirectory,
                                      ApplicationEventPublisher eventPublisher) {
         this.accountRepository = accountRepository;
+        this.ownerDirectory = ownerDirectory;
         this.eventPublisher = eventPublisher;
     }
 
     /**
      * Opens a new account for a customer.
      *
-     * @param ownerId      Keycloak sub of the authenticated user
-     * @param ownerName    display name of the account owner
+     * @param ownerId      Keycloak sub of the authenticated user — stored as
+     *                     bank-core's {@code customerId} so balance lookups by
+     *                     owner work correctly
+     * @param ownerName    display name of the account owner, tracked alongside
+     *                     the account for display purposes
      * @param currencyCode ISO 4217 currency code (e.g. "NGN", "USD")
      * @return the newly created account
      */
     public Account openAccount(String ownerId, String ownerName, String currencyCode) {
         AccountId accountId = AccountId.generate();
+
+        // bank-core's CreateAccount.ownerName parameter becomes Account.customerId().
+        // We pass the Keycloak ownerId here so that AccountRepository.findByCustomerId(ownerId)
+        // correctly returns this account.
         AccountCommand.CreateAccount command =
-            AccountCommand.CreateAccount.now(accountId, ownerName, currencyCode);
+            AccountCommand.CreateAccount.now(accountId, ownerId, currencyCode);
 
         Result<AccountService.AccountCreationResult> result =
             AccountService.createAccount(command);
@@ -56,6 +79,11 @@ public class AccountApplicationService {
 
         AccountService.AccountCreationResult creation = result.getOrThrow();
         accountRepository.save(creation.account());
+
+        // Track the human-readable owner name alongside the account —
+        // this is JPA-layer metadata, not a bank-core domain concern.
+        ownerDirectory.recordOwnerName(accountId.value(), ownerName);
+
         eventPublisher.publishEvent(creation.event());
 
         return creation.account();
@@ -164,5 +192,30 @@ public class AccountApplicationService {
     @Transactional(readOnly = true)
     public List<Account> getAccountsForOwner(String ownerId) {
         return accountRepository.findByCustomerId(ownerId);
+    }
+
+    // ── AccountQueryApi implementation (used by other modules) ───────────
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<String> getOwnerId(String accountId) {
+        return accountRepository.findById(AccountId.of(accountId))
+            .map(Account::customerId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<String> getOwnerName(String accountId) {
+        return ownerDirectory.getOwnerName(accountId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean accountExists(String accountId) {
+        try {
+            return accountRepository.existsById(AccountId.of(accountId));
+        } catch (IllegalArgumentException invalidFormat) {
+            return false;
+        }
     }
 }

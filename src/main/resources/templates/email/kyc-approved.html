@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" th:replace="email/_base :: layout(~{::content})">
+<body>
+<th:block th:ref="content">
+  <div th:fragment="content">
+    <h1 style="font-size:20px; margin:0 0 16px; color:#15803d;">You're verified</h1>
+    <p style="margin:0 0 16px;">
+      Your identity verification has been approved. Your account now has full access to all
+      banking features, including higher transfer limits.
+    </p>
+  </div>
+</th:block>
+</body>
+</html>

@@ -3,6 +3,8 @@ package com.jjenus.banking.accounts.api;
 import com.jjenus.bank.core.accounts.Account;
 import com.jjenus.bank.core.shared.Money;
 import com.jjenus.banking.accounts.application.AccountApplicationService;
+import com.jjenus.banking.identity.IdentityQueryApi;
+import com.jjenus.banking.shared.exception.ResourceNotFoundException;
 import com.jjenus.banking.shared.web.CurrentUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -38,9 +40,12 @@ import java.util.List;
 public class AccountController {
 
     private final AccountApplicationService accountService;
+    private final IdentityQueryApi identityQueryApi;
 
-    public AccountController(AccountApplicationService accountService) {
+    public AccountController(AccountApplicationService accountService,
+                             IdentityQueryApi identityQueryApi) {
         this.accountService = accountService;
+        this.identityQueryApi = identityQueryApi;
     }
 
     // ── Open account ──────────────────────────────────────────────────────
@@ -50,7 +55,13 @@ public class AccountController {
     @PreAuthorize("hasAnyRole('CUSTOMER', 'TELLER', 'ADMIN')")
     public ResponseEntity<AccountResponse> openAccount(@Valid @RequestBody OpenAccountRequest request) {
         String ownerId = CurrentUser.id();
-        String ownerName = CurrentUser.fullName();
+
+        // The authoritative display name lives in the identity module's profile
+        // (set at registration, editable via PATCH /v1/identity/me). Fall back
+        // to the JWT's "name" claim only if no banking profile has been
+        // registered yet, so account opening never hard-fails on a missing profile.
+        String ownerName = identityQueryApi.getFullNameByUserId(ownerId)
+            .orElseGet(CurrentUser::fullName);
 
         Account account = accountService.openAccount(ownerId, ownerName, request.currencyCode());
         AccountResponse response = AccountResponse.from(account);

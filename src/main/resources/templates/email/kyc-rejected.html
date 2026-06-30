@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" th:replace="email/_base :: layout(~{::content})">
+<body>
+<th:block th:ref="content">
+  <div th:fragment="content">
+    <h1 style="font-size:20px; margin:0 0 16px; color:#c0392b;">Verification could not be approved</h1>
+    <p style="margin:0 0 16px;">
+      We were unable to approve your verification documents. You can review the reason below
+      and re-submit corrected documents at any time.
+    </p>
+    <p style="margin:0 0 8px; font-size:13px; color:#6b7280;">Reason:</p>
+    <p style="margin:0; padding:12px; background-color:#fdf2f1; border-radius:4px; font-size:14px;"
+       th:text="${reason}">Reason text</p>
+  </div>
+</th:block>
+</body>
+</html>

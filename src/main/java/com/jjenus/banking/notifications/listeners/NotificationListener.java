@@ -2,6 +2,7 @@ package com.jjenus.banking.notifications.listeners;
 
 import com.jjenus.bank.core.accounts.AccountEvent;
 import com.jjenus.bank.core.transfers.TransferEvent;
+import com.jjenus.banking.identity.domain.IdentityEvent;
 import com.jjenus.banking.notifications.service.EmailService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -115,5 +116,25 @@ public class NotificationListener {
             event.transferId().value(),
             event.reason()
         );
+    }
+
+    // ── Identity / KYC events ─────────────────────────────────────────────
+
+    @ApplicationModuleListener
+    public void onKycSubmitted(IdentityEvent.KycSubmitted event) {
+        log.info("KYC submitted notification for user {}", event.userId());
+        emailService.sendKycSubmittedEmail(event.userId());
+    }
+
+    @ApplicationModuleListener
+    public void onKycApproved(IdentityEvent.KycApproved event) {
+        log.info("KYC approved notification for user {}", event.userId());
+        emailService.sendKycApprovedEmail(event.userId());
+    }
+
+    @ApplicationModuleListener
+    public void onKycRejected(IdentityEvent.KycRejected event) {
+        log.warn("KYC rejected notification for user {}: {}", event.userId(), event.reason());
+        emailService.sendKycRejectedEmail(event.userId(), event.reason());
     }
 }

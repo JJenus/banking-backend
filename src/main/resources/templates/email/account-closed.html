@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" th:replace="email/_base :: layout(~{::content})">
+<body>
+<th:block th:ref="content">
+  <div th:fragment="content">
+    <h1 style="font-size:20px; margin:0 0 16px;">Your account has been closed</h1>
+    <p style="margin:0 0 16px;">
+      Account <span style="font-family:monospace;" th:text="${accountId}">ACC-XXXXXXXXXX</span>
+      has been permanently closed.
+    </p>
+    <p style="margin:0 0 8px; font-size:13px; color:#6b7280;">Reason:</p>
+    <p style="margin:0; padding:12px; background-color:#f9fafb; border-radius:4px; font-size:14px;"
+       th:text="${reason}">Reason text</p>
+  </div>
+</th:block>
+</body>
+</html>

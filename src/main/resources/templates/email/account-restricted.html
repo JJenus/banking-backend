@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" th:replace="email/_base :: layout(~{::content})">
+<body>
+<th:block th:ref="content">
+  <div th:fragment="content">
+    <h1 style="font-size:20px; margin:0 0 16px; color:#c0392b;">Your account has been restricted</h1>
+    <p style="margin:0 0 16px;">
+      Your account <span style="font-family:monospace;" th:text="${accountId}">ACC-XXXXXXXXXX</span>
+      has been temporarily restricted and cannot process deposits, withdrawals, or transfers until reactivated.
+    </p>
+    <p style="margin:0 0 8px; font-size:13px; color:#6b7280;">Reason:</p>
+    <p style="margin:0 0 16px; padding:12px; background-color:#fdf2f1; border-radius:4px; font-size:14px;"
+       th:text="${reason}">Reason text</p>
+    <p style="margin:0; font-size:13px; color:#6b7280;">
+      If you believe this is an error, contact us at
+      <a th:href="'mailto:' + ${supportEmail}" th:text="${supportEmail}"
+         style="color:#2563eb; text-decoration:none;">support@banking.local</a>.
+    </p>
+  </div>
+</th:block>
+</body>
+</html>

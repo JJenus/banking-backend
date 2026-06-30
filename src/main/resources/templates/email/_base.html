@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<!--
+  _base.html — shared layout fragment for all transactional emails.
+
+  Other templates include this via th:replace="email/_base :: layout(~{::content})"
+  Inline CSS only — most email clients strip <style> blocks or <link> tags.
+-->
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<th:block th:fragment="layout(content)">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+         style="background-color:#f4f5f7; padding:32px 0; font-family:Arial,Helvetica,sans-serif;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0"
+               style="background-color:#ffffff; border-radius:8px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#0d1b2a; padding:24px 32px;">
+              <span style="color:#ffffff; font-size:18px; font-weight:bold; letter-spacing:-0.02em;"
+                    th:text="${fromName}">Banking Services</span>
+            </td>
+          </tr>
+
+          <!-- Body content -->
+          <tr>
+            <td style="padding:32px; color:#1a1a1a; font-size:15px; line-height:1.6;">
+              <div th:replace="${content}">Email body goes here</div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:24px 32px; background-color:#f9fafb; border-top:1px solid #e5e7eb;">
+              <p style="margin:0; font-size:12px; color:#6b7280; line-height:1.5;">
+                This is an automated message. If you have questions, contact us at
+                <a th:href="'mailto:' + ${supportEmail}" th:text="${supportEmail}"
+                   style="color:#2563eb; text-decoration:none;">support@banking.local</a>.
+              </p>
+              <p style="margin:8px 0 0; font-size:12px; color:#9ca3af;">
+                If you did not expect this email, please contact support immediately.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</th:block>
+</body>
+</html>
