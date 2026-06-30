@@ -61,3 +61,4 @@ target/modulith-docs/
 *.tar.gz
 *.rar
 !.mvn/wrapper/maven-wrapper.jar
+.github/workflows/
