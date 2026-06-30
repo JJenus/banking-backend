@@ -1,0 +1,82 @@
+{
+  "realm": "banking",
+  "displayName": "Banking Platform",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+  "defaultSignatureAlgorithm": "RS256",
+  "accessTokenLifespan": 300,
+  "accessTokenLifespanForImplicitFlow": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      {
+        "name": "CUSTOMER",
+        "description": "Standard bank customer — can view and manage their own accounts"
+      },
+      {
+        "name": "TELLER",
+        "description": "Bank teller — can perform deposits/withdrawals on any account"
+      },
+      {
+        "name": "ADMIN",
+        "description": "System administrator — full access including freeze/close"
+      },
+      {
+        "name": "COMPLIANCE",
+        "description": "Compliance officer — read-only audit log access, can freeze accounts"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "banking-frontend",
+      "name": "Banking Frontend (Nuxt)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "https://your-domain.com/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "https://your-domain.com"
+      ],
+      "defaultClientScopes": ["web-origins", "profile", "roles", "email"],
+      "optionalClientScopes": ["address", "phone", "offline_access"]
+    },
+    {
+      "clientId": "banking-backend",
+      "name": "Banking Backend (Spring Boot)",
+      "enabled": true,
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "secret": "changeme-replace-in-production",
+      "defaultClientScopes": ["web-origins", "profile", "roles", "email"]
+    }
+  ],
+  "passwordPolicy": "length(8) and upperCase(1) and digits(1) and notUsername",
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30
+}

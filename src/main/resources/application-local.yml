@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Local development profile  (activate with: -Dspring.profiles.active=local)
+# Uses Docker Compose services defined in docker-compose.yml
+# ─────────────────────────────────────────────────────────────────────────────
+spring:
+  jpa:
+    show-sql: true
+  thymeleaf:
+    cache: false
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:8180/realms/banking
+          jwk-set-uri: http://localhost:8180/realms/banking/protocol/openid-connect/certs
+
+server:
+  error:
+    include-message: always
+    include-stacktrace: on_param
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0   # Trace everything locally
+
+banking:
+  security:
+    cors:
+      allowed-origins:
+        - http://localhost:3000
+        - http://localhost:3001
+
+logging:
+  level:
+    com.jjenus.banking: DEBUG
+    org.springframework.security: DEBUG
+    org.springframework.modulith: DEBUG
+    org.flywaydb: INFO

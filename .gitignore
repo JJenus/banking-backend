@@ -1,0 +1,63 @@
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Eclipse
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+# Environment — NEVER commit .env
+.env
+*.env
+!.env.example
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes (if accidentally created locally)
+postgres-data/
+redis-data/
+keycloak-data/
+postal-data/
+prometheus-data/
+grafana-data/
+nginx-certs/
+
+# Spring Boot devtools restart file
+.reloadtrigger
+
+# Module documentation output
+target/modulith-docs/
+
+# Build artifacts
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+!.mvn/wrapper/maven-wrapper.jar
