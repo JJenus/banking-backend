@@ -8,6 +8,7 @@ import com.jjenus.bank.core.shared.Money;
 import com.jjenus.bank.core.shared.Result;
 import com.jjenus.bank.core.transfers.*;
 import com.jjenus.banking.shared.exception.ResourceNotFoundException;
+import com.jjenus.banking.transactions.infrastructure.TransactionRepository;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -15,6 +16,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.util.Currency;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Application service for transfer operations.
@@ -35,6 +38,7 @@ public class TransferApplicationService {
 
     private final AccountRepository accountRepository;
     private final TransferRepository transferRepository;
+    private final TransactionRepository transactionRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final RedisTemplate<String, String> redis;
 
@@ -43,12 +47,14 @@ public class TransferApplicationService {
 
     public TransferApplicationService(AccountRepository accountRepository,
                                       TransferRepository transferRepository,
+                                      TransactionRepository transactionRepository,
                                       ApplicationEventPublisher eventPublisher,
                                       RedisTemplate<String, String> redis) {
-        this.accountRepository  = accountRepository;
-        this.transferRepository = transferRepository;
-        this.eventPublisher     = eventPublisher;
-        this.redis              = redis;
+        this.accountRepository      = accountRepository;
+        this.transferRepository     = transferRepository;
+        this.transactionRepository  = transactionRepository;
+        this.eventPublisher         = eventPublisher;
+        this.redis                  = redis;
     }
 
     /**
@@ -108,6 +114,10 @@ public class TransferApplicationService {
         accountRepository.update(execution.updatedFromAccount());
         accountRepository.update(execution.updatedToAccount());
         transferRepository.save(execution.transfer());
+        transactionRepository.saveAll(List.of(
+            execution.debitTransaction(),
+            execution.creditTransaction()
+        ));
 
         // 6. Cache idempotency key
         redis.opsForValue().set(redisKey, execution.transfer().id().value(), IDEMPOTENCY_TTL);
@@ -139,6 +149,10 @@ public class TransferApplicationService {
         accountRepository.update(reversal.updatedReceiverAccount());
         accountRepository.update(reversal.updatedSenderAccount());
         transferRepository.update(reversal.reversedTransfer());
+        transactionRepository.saveAll(List.of(
+            reversal.reversalDebitTransaction(),
+            reversal.reversalCreditTransaction()
+        ));
 
         reversal.domainEvents().forEach(eventPublisher::publishEvent);
 
@@ -149,5 +163,32 @@ public class TransferApplicationService {
     public Transfer getTransfer(String transferId) {
         return transferRepository.findById(TransferId.of(transferId))
             .orElseThrow(() -> ResourceNotFoundException.of("Transfer", transferId));
+    }
+
+    @Transactional(readOnly = true)
+    public List<Transfer> getTransfersForAccount(String accountId) {
+        return transferRepository.findByAccountId(
+            com.jjenus.bank.core.accounts.AccountId.of(accountId));
+    }
+
+    @Transactional(readOnly = true)
+    public List<Transfer> getTransfersForOwner(String ownerId) {
+        // All accounts for this owner, then all transfers across them
+        return accountRepository.findByCustomerId(ownerId).stream()
+            .flatMap(account -> transferRepository
+                .findByAccountId(account.id()).stream())
+            .distinct()
+            .sorted(java.util.Comparator.comparing(Transfer::createdAt).reversed())
+            .collect(java.util.stream.Collectors.toList());
+    }
+
+    public Transfer cancelTransfer(String transferId, String reason) {
+        Transfer transfer = transferRepository.getById(TransferId.of(transferId));
+        com.jjenus.bank.core.shared.Result<Transfer> result =
+            com.jjenus.bank.core.transfers.TransferService.cancelTransfer(transfer, reason);
+        if (result.isFailure()) throw new IllegalStateException(result.getErrorOrNull());
+        Transfer cancelled = result.getOrThrow();
+        transferRepository.update(cancelled);
+        return cancelled;
     }
 }

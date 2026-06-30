@@ -7,6 +7,7 @@ import com.jjenus.bank.core.shared.Result;
 import com.jjenus.banking.accounts.AccountQueryApi;
 import com.jjenus.banking.accounts.infrastructure.AccountOwnerDirectory;
 import com.jjenus.banking.shared.exception.ResourceNotFoundException;
+import com.jjenus.banking.transactions.infrastructure.TransactionRepository;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,14 +41,17 @@ public class AccountApplicationService implements AccountQueryApi {
 
     private final AccountRepository accountRepository;
     private final AccountOwnerDirectory ownerDirectory;
+    private final TransactionRepository transactionRepository;
     private final ApplicationEventPublisher eventPublisher;
 
     public AccountApplicationService(AccountRepository accountRepository,
                                      AccountOwnerDirectory ownerDirectory,
+                                     TransactionRepository transactionRepository,
                                      ApplicationEventPublisher eventPublisher) {
-        this.accountRepository = accountRepository;
-        this.ownerDirectory = ownerDirectory;
-        this.eventPublisher = eventPublisher;
+        this.accountRepository      = accountRepository;
+        this.ownerDirectory         = ownerDirectory;
+        this.transactionRepository  = transactionRepository;
+        this.eventPublisher         = eventPublisher;
     }
 
     /**
@@ -106,6 +110,7 @@ public class AccountApplicationService implements AccountQueryApi {
 
         AccountService.DepositResult deposit = result.getOrThrow();
         accountRepository.update(deposit.updatedAccount());
+        transactionRepository.save(deposit.transaction());
         eventPublisher.publishEvent(deposit.event());
 
         return deposit.updatedAccount();
@@ -128,6 +133,7 @@ public class AccountApplicationService implements AccountQueryApi {
 
         AccountService.WithdrawalResult withdrawal = result.getOrThrow();
         accountRepository.update(withdrawal.updatedAccount());
+        transactionRepository.save(withdrawal.transaction());
         eventPublisher.publishEvent(withdrawal.event());
 
         return withdrawal.updatedAccount();
