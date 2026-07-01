@@ -32,7 +32,26 @@ interface LedgerEntryJpaRepository extends JpaRepository<LedgerEntryJpaEntity, S
 
     List<LedgerEntryJpaEntity> findByReference(String reference);
 
-    boolean existsByReferenceAndSourceId(String reference, String sourceId);
+    @Query("""
+        SELECT e FROM LedgerEntryJpaEntity e
+        WHERE e.currency = :currency
+          AND e.postedAt <= :asOf
+        ORDER BY e.postedAt ASC
+        """)
+    List<LedgerEntryJpaEntity> findAllByCurrencyAndPostedAtBefore(
+        @Param("currency") String currency,
+        @Param("asOf") Instant asOf);
+
+    @Query("""
+        SELECT e FROM LedgerEntryJpaEntity e
+        WHERE (e.debitAccountId = :accountId OR e.creditAccountId = :accountId)
+          AND e.postedAt BETWEEN :from AND :to
+        ORDER BY e.postedAt ASC
+        """)
+    List<LedgerEntryJpaEntity> findByAccountIdAndPostedAtBetween(
+        @Param("accountId") String accountId,
+        @Param("from") Instant from,
+        @Param("to") Instant to);
 
     @Query("""
         SELECT COALESCE(SUM(

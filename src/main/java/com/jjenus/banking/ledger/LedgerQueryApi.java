@@ -40,6 +40,12 @@ public interface LedgerQueryApi {
     List<LedgerEntryView> getEntriesForAccountInRange(String accountId, Instant from, Instant to);
 
     /**
+     * Returns ALL ledger entries up to and including {@code asOf}, across all accounts,
+     * for a specific currency. Used by the trial balance report.
+     */
+    List<LedgerEntryView> getAllEntriesAsOf(String currencyCode, Instant asOf);
+
+    /**
      * A read-only, module-agnostic view of a ledger entry. Decouples consumers
      * from bank-core's {@code LedgerEntry} type so the ledger module's internal
      * representation can evolve without breaking other modules' compile-time
