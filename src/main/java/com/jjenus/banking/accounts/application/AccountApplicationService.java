@@ -187,6 +187,23 @@ public class AccountApplicationService implements AccountQueryApi {
         return change.updatedAccount();
     }
 
+    /**
+     * Suspends an account (regulatory hold — differs from freeze in that
+     * SUSPENDED accounts cannot be activated without compliance review).
+     */
+    public Account suspendAccount(String accountId, String reason) {
+        Account account = accountRepository.getById(AccountId.of(accountId));
+        AccountCommand.SuspendAccount command = AccountCommand.SuspendAccount.now(account.id(), reason);
+
+        Result<AccountService.AccountStatusChangeResult> result = AccountService.suspend(account, command);
+        if (result.isFailure()) throw new IllegalStateException(result.getErrorOrNull());
+
+        AccountService.AccountStatusChangeResult change = result.getOrThrow();
+        accountRepository.update(change.updatedAccount());
+        eventPublisher.publishEvent(change.event());
+        return change.updatedAccount();
+    }
+
     // ── Queries ───────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)

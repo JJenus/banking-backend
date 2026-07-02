@@ -1,147 +1,69 @@
 # WORKING_STATE.md
-# Single source of truth for the current implementation state.
-# Updated on every commit. Read THIS file first, not the whole codebase.
+# Read THIS file first each session. Do not scan the whole codebase.
+# Updated: after final push (admin + tests complete)
 
 ## Repositories
-- bank-core:        https://github.com/JJenus/bank-core       (domain library)
+- bank-core:        https://github.com/JJenus/bank-core       (domain library, DO NOT edit here)
 - banking-backend:  https://github.com/JJenus/banking-backend  (this repo)
 
 ## Stack
 Java 17 · Spring Boot 3.4.1 · Spring Modulith 1.3.1 · PostgreSQL 16
-Redis 7 · Keycloak 26 (self-hosted, Apache 2.0) · Postal SMTP (self-hosted, MIT)
-Flyway 10 · Thymeleaf · OpenPDF · springdoc-openapi · Testcontainers
+Redis 7 · Keycloak 26 self-hosted · Postal SMTP self-hosted
+Flyway 10 · Thymeleaf · OpenPDF (com.lowagie.text) · springdoc-openapi
 
-## Package root
-com.jjenus.banking
+## Package root: com.jjenus.banking
 
-## Module map
-| Module        | Root package                        | Status      | Public API interface     |
-|---------------|-------------------------------------|-------------|--------------------------|
-| identity      | com.jjenus.banking.identity         | COMPLETE    | IdentityQueryApi         |
-| accounts      | com.jjenus.banking.accounts         | COMPLETE    | AccountQueryApi          |
-| transfers     | com.jjenus.banking.transfers        | PARTIAL*    | —                        |
-| ledger        | com.jjenus.banking.ledger           | COMPLETE    | LedgerQueryApi           |
-| notifications | com.jjenus.banking.notifications    | COMPLETE    | (event-driven, no API)   |
-| audit         | com.jjenus.banking.audit            | COMPLETE    | (event-driven, no API)   |
-| reporting     | com.jjenus.banking.reporting        | TODO        | ReportingQueryApi        |
-| admin         | com.jjenus.banking.admin            | TODO        | (REST endpoints only)    |
-| shared        | com.jjenus.banking.shared           | COMPLETE    | —                        |
+## Module status — ALL COMPLETE
+| Module        | Root package                     | Public API               | Controller base path      |
+|---------------|----------------------------------|--------------------------|---------------------------|
+| identity      | c.j.b.identity                   | IdentityQueryApi         | /v1/identity              |
+| accounts      | c.j.b.accounts                   | AccountQueryApi          | /v1/accounts              |
+| transfers     | c.j.b.transfers                  | (events only)            | /v1/transfers             |
+| transactions  | c.j.b.transactions               | TransactionRepository    | (no controller, read only)|
+| ledger        | c.j.b.ledger                     | LedgerQueryApi           | /v1/ledger                |
+| notifications | c.j.b.notifications              | (event-driven, no API)   | —                         |
+| audit         | c.j.b.audit                      | (event-driven, no API)   | —                         |
+| reporting     | c.j.b.reporting                  | ReportingApplicationSvc  | /v1/reporting             |
+| admin         | c.j.b.admin                      | (REST only)              | /v1/admin                 |
+| shared        | c.j.b.shared                     | —                        | —                         |
 
-*transfers: TransferApplicationService done, TransferJpaEntity/Adapter/Controller TODO
+## All committed features
+1. Scaffold — pom, configs, SecurityConfig, BankingProperties, GlobalExceptionHandler,
+   CurrentUser, docker-compose, Dockerfile, Flyway V001-V004, README/CONTRIBUTING/AGENT.md
+2. Identity — UserProfileJpaEntity, KycStatus, IdentityEvent, IdentityApplicationService
+   (implements IdentityQueryApi), IdentityController, KYC state machine with events
+3. Ledger — SystemAccounts (CASH/FEE_INCOME/INTEREST_EXPENSE), LedgerEntryJpaEntity,
+   LedgerEntryJpaRepository, LedgerRepositoryAdapter, LedgerListener (@AppModuleListener),
+   LedgerApplicationService (implements LedgerQueryApi), LedgerController, Flyway V005
+4. Accounts fixes — AccountQueryApi, AccountOwnerDirectory, ownerId/ownerName separation,
+   AccountJpaRepository with updateOwnerName, AccountApplicationService implements AccountQueryApi,
+   AccountController uses IdentityQueryApi for owner name, suspendAccount() added
+5. Notifications — EmailService fully wired (no stubs): accountId→AccountQueryApi→ownerId
+   →IdentityQueryApi→email. 13 Thymeleaf templates. KYC email notifications.
+6. Reporting — AccountStatement, TrialBalance, StatementPdfGenerator (OpenPDF),
+   ReportingApplicationService, ReportingController (JSON + PDF endpoints, trial balance)
+7. Transfers+Transactions — TransferJpaEntity, TransferJpaRepository, TransferRepositoryAdapter,
+   TransactionJpaEntity, TransactionJpaRepository, TransactionRepository, TransferController,
+   TransferApplicationService fully wired (idempotency, save transactions), Flyway V006
+8. Admin — AdminController: system stats, account lookup/freeze/activate/suspend/close,
+   pending/failed transfers, KYC queue management, audit log queries
+9. Tests — AccountApplicationServiceTest, IdentityApplicationServiceTest,
+   LedgerListenerTest, TransferApplicationServiceTest, ReportingApplicationServiceTest
 
-## What's done (by feature commit order)
-
-### Scaffold commit (initial push)
-- BankingApplication.java
-- pom.xml (all 18 deps with exact versions)
-- application.yml + application-local.yml
-- SecurityConfig (Keycloak JWT, role extractor from realm_access.roles)
-- BankingProperties (typed @ConfigurationProperties record)
-- RedisConfig
-- GlobalExceptionHandler (RFC 7807 ProblemDetail for all error types)
-- ResourceNotFoundException
-- CurrentUser (JWT claim extractor util)
-- docker-compose.yml (8 services)
-- Dockerfile (multi-stage, non-root, G1GC)
-- docker/postgres/init.sql
-- docker/keycloak/realm-banking.json (4 roles: CUSTOMER TELLER ADMIN COMPLIANCE)
-- docker/nginx/nginx.conf
-- docker/prometheus/prometheus.yml
-- Flyway V001 (accounts table), V002 (transfers+transactions), V003 (ledger_entries), V004 (audit_log+user_profiles)
-- README.md, CONTRIBUTING.md, AGENT.md, docs/architecture.md, docs/RUNNING.md
-- ApplicationModulesTest
-
-### Identity feature commit
-- identity/domain/KycStatus.java (PENDING→SUBMITTED→UNDER_REVIEW→APPROVED/REJECTED)
-- identity/domain/IdentityEvent.java (sealed: KycSubmitted, KycApproved, KycRejected)
-- identity/infrastructure/UserProfileJpaEntity.java
-- identity/infrastructure/UserProfileJpaRepository.java
-- identity/application/IdentityApplicationService.java (implements IdentityQueryApi)
-  - register(), getMyProfile(), updateProfile()
-  - submitKyc(), startKycReview(), approveKyc(), rejectKyc()
-  - Publishes IdentityEvent on every KYC transition
-- identity/api/IdentityController.java
-  - POST /v1/identity/register (public)
-  - GET/PATCH /v1/identity/me
-  - POST /v1/identity/me/kyc/submit (CUSTOMER)
-  - GET /v1/identity/kyc/pending, /{id}/kyc/start-review, approve, reject (ADMIN/COMPLIANCE)
-  - GET /v1/identity/{id} (ADMIN/TELLER/COMPLIANCE)
-- IdentityQueryApi.java (getEmailByUserId, getFullNameByUserId, profileExists)
-
-- FIXED resolveEmail() stub → EmailService now resolves via:
-  accountId → AccountQueryApi.getOwnerId() → IdentityQueryApi.getEmailByUserId()
-- FIXED accounts ownerId/ownerName conflation:
-  Account.customerId() = Keycloak ownerId (not display name)
-  Display name stored separately via AccountOwnerDirectory (owner_name column)
-- NEW AccountQueryApi (getOwnerId, getOwnerName, accountExists)
-  implemented by AccountApplicationService
-- NEW AccountOwnerDirectory (JPA-layer metadata for display names)
-- UPDATED AccountJpaRepository (findOwnerName, updateOwnerName queries)
-- UPDATED AccountApplicationService (implements AccountQueryApi, injects AccountOwnerDirectory)
-- UPDATED AccountController (injects IdentityQueryApi, resolves ownerName from profile)
-- UPDATED NotificationListener (added KYC event handlers)
-- UPDATED EmailService (real recipient resolution, sendKycSubmittedEmail etc.)
-
-- 13 Thymeleaf email templates (all complete, no stubs):
-  _base.html, account-opened, deposit-confirmation, withdrawal-confirmation,
-  transfer-sent, transfer-received, transfer-reversed, transfer-failed-ops,
-  account-restricted, account-activated, account-closed,
-  kyc-submitted, kyc-approved, kyc-rejected
-
-- package-info.java for accounts and identity modules
-
-### Ledger feature (IN PROGRESS — not yet committed/pushed)
-- ledger/domain/SystemAccounts.java (CASH=ACC-SYSCASH001, FEE_INCOME=ACC-SYSFEEINC1, INTEREST_EXPENSE=ACC-SYSINTEXP1)
-- ledger/infrastructure/LedgerEntryJpaEntity.java
-- ledger/infrastructure/LedgerEntryJpaRepository.java (computeBalance JPQL queries)
-- ledger/infrastructure/LedgerRepositoryAdapter.java (implements bank-core LedgerRepository port)
-- ledger/application/LedgerListener.java (@ApplicationModuleListener: onMoneyDeposited, onMoneyWithdrawn, onTransferCompleted, onTransferReversed)
-- ledger/application/LedgerApplicationService.java (implements LedgerQueryApi)
-- ledger/api/LedgerController.java (GET balance, balance-as-of, entries)
-- LedgerQueryApi.java (computeBalance, computeBalanceAsOf, getEntriesForAccount, getEntriesForAccountInRange, LedgerEntryView record)
-- ledger/package-info.java
-- Flyway V005 (add currency column to ledger_entries)
-
-## Key architectural decisions
-
-### Bank-core port mapping
-bank-core port interface         → Spring @Repository implementing it
-AccountRepository                → AccountRepositoryAdapter
-LedgerRepository                 → LedgerRepositoryAdapter
-TransferRepository               → TransferRepositoryAdapter (TODO)
-EventStore                       → EventStoreAdapter (TODO — not blocking)
-
-### ownerId vs ownerName (IMPORTANT)
-Account.customerId() = Keycloak sub UUID  (used for findByCustomerId)
-AccountJpaEntity.ownerName = display name (set by AccountOwnerDirectory after save)
-These are separate. Never conflate them.
-
-### Cross-module query resolution chain (notifications)
-accountId
-  → AccountQueryApi.getOwnerId(accountId)     → Keycloak ownerId
-  → IdentityQueryApi.getEmailByUserId(ownerId) → email address
-
-### Event flow
-Request → Controller → ApplicationService → bank-core → persist → publishEvent
-[tx commits]
-→ @ApplicationModuleListener: LedgerListener, NotificationListener, AuditListener
-
-### SystemAccounts (ledger counter-parties)
-NOT rows in banking.accounts table. No FK constraints on ledger_entries.
-Valid bank-core AccountId format (ACC-XXXXXXXXXX, 10 uppercase alphanumeric).
-
-## Flyway migration history
-V001 — accounts table (banking schema)
+## Flyway migration history (V001-V006 all pushed)
+V001 — banking schema + accounts table
 V002 — transfers + transactions tables
-V003 — ledger_entries table (no currency column — fixed in V005)
+V003 — ledger_entries table
 V004 — audit_log + user_profiles tables
-V005 — add currency CHAR(3) to ledger_entries (IN PROGRESS, not yet pushed)
+V005 — add currency column to ledger_entries
+V006 — add currency column to transactions
 
-## bank-core key signatures (avoid re-reading files for these)
+## Key bank-core signatures (avoid re-reading files for these)
 
-### Account record fields (order matters for constructor)
+### Account record constructor (field order)
 Account(AccountId id, String customerId, Money balance, AccountStatus status,
         Instant createdAt, Instant lastUpdatedAt, long version)
+// customerId = Keycloak sub/ownerId (NOT display name)
 
 ### AccountCommand factories
 CreateAccount.now(AccountId, String ownerName, String currencyCode)
@@ -153,54 +75,110 @@ CloseAccount.now(AccountId, String reason)
 SuspendAccount.now(AccountId, String reason)
 MarkAccountDormant.now(AccountId)
 
-### LedgerEntry static factories (all take: LedgerEntryId, AccountId, AccountId, Money, String ref, String sourceId)
-LedgerEntry.forDeposit(id, cashAccount, customerAccount, amount, reference, sourceId)
-LedgerEntry.forWithdrawal(id, customerAccount, cashAccount, amount, reference, sourceId)
-LedgerEntry.forTransfer(id, fromAccount, toAccount, amount, reference, sourceId)
-LedgerEntry.forFee(id, customerAccount, feeAccount, amount, description, sourceId)
-LedgerEntry.forReversal(id, originalEntry, reason)
-LedgerEntry.forInterest(id, interestExpenseAccount, customerAccount, amount, reference, sourceId)
+### Transfer record constructor (field order)
+Transfer(TransferId id, AccountId fromAccountId, AccountId toAccountId,
+         Money amount, TransferStatus status, String description, String reference,
+         Instant createdAt, Instant completedAt,
+         TransactionId debitTransactionId, TransactionId creditTransactionId,
+         String failureReason)
 
-### AccountId format
-Pattern: ACC-[A-Z0-9]{10}  (exactly 10 uppercase alphanumeric after prefix)
+### Transaction.create* factories (all return Transaction)
+createDeposit(TransactionId, AccountId, Money amount, Money balanceAfter, String reference)
+createWithdrawal(TransactionId, AccountId, Money amount, Money balanceAfter, String reference)
+createTransferOut(TransactionId, AccountId, Money amount, Money balanceAfter, String reference, String linkedTxId)
+createTransferIn(TransactionId, AccountId, Money amount, Money balanceAfter, String reference, String linkedTxId)
+createFee(TransactionId, AccountId, Money amount, Money balanceAfter, String reference, String linkedTxId)
+createRefund(TransactionId, AccountId, Money amount, Money balanceAfter, String reference, String linkedTxId)
+createReversal(TransactionId, AccountId, Money amount, Money balanceAfter, String reference, String linkedTxId)
 
-### LedgerEntryId format
-Pattern: JNL-[A-Z0-9]{12}  (exactly 12 uppercase alphanumeric after prefix)
+### LedgerEntry.for* factories (all 6 args unless noted)
+forDeposit(LedgerEntryId, cashAccountId, customerAccountId, Money, reference, sourceId)
+forWithdrawal(LedgerEntryId, customerAccountId, cashAccountId, Money, reference, sourceId)
+forTransfer(LedgerEntryId, fromAccountId, toAccountId, Money, reference, sourceId)
+forFee(LedgerEntryId, customerAccountId, feeAccountId, Money, description, sourceId)
+forReversal(LedgerEntryId, LedgerEntry originalEntry, String reason)  // 3 args
 
-### TransferId format
-Pattern: TRF-[A-Z0-9]{12}
+### ID formats (bank-core regex)
+AccountId:     ACC-[A-Z0-9]{10}
+TransferId:    TRF-[A-Z0-9]{12}
+TransactionId: TXN-[A-Z0-9]{12}
+LedgerEntryId: JNL-[A-Z0-9]{12}
 
-### TransactionId format
-Pattern: TXN-[A-Z0-9]{12}
+### System account IDs (not in banking.accounts table — ledger counter-parties only)
+SystemAccounts.CASH             = ACC-SYSCASH001
+SystemAccounts.FEE_INCOME       = ACC-SYSFEEINC1
+SystemAccounts.INTEREST_EXPENSE = ACC-SYSINTEXP1
 
-### AccountStatus.canDeposit() returns true for: ACTIVE, DORMANT
-### AccountStatus.canTransact() returns true for: ACTIVE only
+### AccountStatus
+canDeposit()  → ACTIVE, DORMANT
+canTransact() → ACTIVE only
 
-### TransferEvent records
-TransferInitiated(eventId, occurredOn, transferId, fromAccountId, toAccountId, amount, reference)
-TransferDebited(eventId, occurredOn, transferId, fromAccountId, amount, debitTransactionId)
-TransferCredited(eventId, occurredOn, transferId, toAccountId, amount, creditTransactionId)
-TransferCompleted(eventId, occurredOn, transferId, fromAccountId, toAccountId, amount)
-TransferFailed(eventId, occurredOn, transferId, reason)
-TransferReversed(eventId, occurredOn, transferId, originalFromAccountId, originalToAccountId, amount, reason, reversalDebitTransactionId, reversalCreditTransactionId)
-TransferCancelled(eventId, occurredOn, transferId, reason)
+### Cross-module query chain (notifications recipient resolution)
+accountId → AccountQueryApi.getOwnerId() → Keycloak ownerId
+         → IdentityQueryApi.getEmailByUserId() → email
 
-### AccountEvent records
-AccountCreated(eventId, occurredOn, accountId, ownerName, currency)
-MoneyDeposited(eventId, occurredOn, accountId, amount, reference)
-MoneyWithdrawn(eventId, occurredOn, accountId, amount, reference)
-AccountFrozen(eventId, occurredOn, accountId, reason)
-AccountActivated(eventId, occurredOn, accountId)
-AccountClosed(eventId, occurredOn, accountId, reason)
-AccountSuspended(eventId, occurredOn, accountId, reason)
-AccountMarkedDormant(eventId, occurredOn, accountId)
+### Event flow
+Request → Controller → ApplicationService → bank-core → persist → publishEvent
+[transaction commits]
+→ @ApplicationModuleListener: LedgerListener, NotificationListener, AuditListener
 
-## TODO — remaining features to implement
-1. ✅ identity module
-2. ✅ ledger module (listener + persistence + queries)  ← IN PROGRESS
-3. transfers JPA + controller (TransferJpaEntity, TransferRepositoryAdapter, TransferController)
-4. TransactionJpaEntity + TransactionRepositoryAdapter (for statement lines)
-5. reporting module (account statements, trial balance, PDF export via OpenPDF)
-6. admin module (ops REST endpoints: list all accounts, freeze/unfreeze any, KYC queue, system stats)
-7. ApplicationModulesTest (verify all boundaries pass)
-8. Integration tests (AccountApplicationServiceTest, TransferApplicationServiceTest, LedgerListenerTest)
+## REST API surface (all under /api prefix from server.servlet.context-path)
+POST   /v1/identity/register                    (public)
+GET    /v1/identity/me                          (authenticated)
+PATCH  /v1/identity/me
+POST   /v1/identity/me/kyc/submit               (CUSTOMER)
+GET    /v1/identity/kyc/pending                 (ADMIN, COMPLIANCE)
+POST   /v1/identity/{id}/kyc/start-review
+POST   /v1/identity/{id}/kyc/approve
+POST   /v1/identity/{id}/kyc/reject
+GET    /v1/identity/{id}                        (ADMIN, TELLER, COMPLIANCE)
+
+POST   /v1/accounts                             (CUSTOMER, TELLER, ADMIN)
+GET    /v1/accounts/{id}
+GET    /v1/accounts/my                          (CUSTOMER)
+POST   /v1/accounts/{id}/deposit                (TELLER, ADMIN)
+POST   /v1/accounts/{id}/withdraw               (TELLER, ADMIN)
+POST   /v1/accounts/{id}/freeze                 (ADMIN, COMPLIANCE)
+POST   /v1/accounts/{id}/activate               (ADMIN, COMPLIANCE)
+DELETE /v1/accounts/{id}                        (ADMIN)
+
+POST   /v1/transfers                            (Idempotency-Key header required)
+GET    /v1/transfers/{id}
+GET    /v1/transfers/by-account/{accountId}
+GET    /v1/transfers/my                         (CUSTOMER)
+POST   /v1/transfers/{id}/reverse               (ADMIN)
+POST   /v1/transfers/{id}/cancel
+
+GET    /v1/ledger/accounts/{id}/balance         (?currency=NGN)
+GET    /v1/ledger/accounts/{id}/balance-as-of   (?currency=NGN&asOf=ISO-instant)
+GET    /v1/ledger/accounts/{id}/entries
+
+GET    /v1/reporting/accounts/{id}/statement    (?from=ISO&to=ISO)
+GET    /v1/reporting/accounts/{id}/statement/pdf
+GET    /v1/reporting/trial-balance              (?currency=NGN&asOf=ISO — ADMIN, COMPLIANCE)
+
+GET    /v1/admin/stats
+GET    /v1/admin/accounts/{id}                  (ADMIN, TELLER, COMPLIANCE)
+GET    /v1/admin/accounts/by-owner/{ownerId}
+POST   /v1/admin/accounts/{id}/freeze
+POST   /v1/admin/accounts/{id}/activate
+POST   /v1/admin/accounts/{id}/suspend
+DELETE /v1/admin/accounts/{id}
+GET    /v1/admin/transfers/pending
+GET    /v1/admin/transfers/failed
+GET    /v1/admin/kyc/pending                    (ADMIN, COMPLIANCE)
+GET    /v1/admin/kyc/under-review
+POST   /v1/admin/kyc/{id}/start-review
+POST   /v1/admin/kyc/{id}/approve
+POST   /v1/admin/kyc/{id}/reject
+GET    /v1/admin/audit/{aggregateId}            (ADMIN, COMPLIANCE)
+GET    /v1/admin/audit/actor/{actorId}
+
+## TODO (future sprints — not blocking launch)
+- Integration tests with Testcontainers (Postgres + Redis)
+- EventStore port adapter (optional — bank-core EventStore port, not yet needed)
+- FeePolicy wiring into TransferApplicationService
+- OverdraftPolicy configuration
+- Paystack webhook handler for top-up flow
+- KYC document upload (S3/local storage)
+- HTTPS cert automation (Let's Encrypt via nginx)
