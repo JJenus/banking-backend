@@ -6,6 +6,7 @@ import com.jjenus.bank.core.ledger.LedgerEntryId;
 import com.jjenus.bank.core.ports.LedgerRepository;
 import com.jjenus.bank.core.transfers.TransferEvent;
 import com.jjenus.banking.ledger.domain.SystemAccounts;
+import com.jjenus.banking.transfers.application.FeeChargedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.modulith.events.ApplicationModuleListener;
@@ -147,6 +148,34 @@ public class LedgerListener {
                 + "amount {} — account balances were reversed but ledger was not. "
                 + "Manual reconciliation required.",
                 event.transferId().value(), event.amount().format(), e);
+        }
+    }
+
+    @ApplicationModuleListener
+    @Transactional
+    public void onFeeCharged(FeeChargedEvent event) {
+        try {
+            LedgerEntry entry = LedgerEntry.forFee(
+                LedgerEntryId.generate(),
+                event.chargedAccountId(),
+                SystemAccounts.FEE_INCOME,
+                event.feeAmount(),
+                "Transfer fee: " + event.feePolicyDescription(),
+                event.relatedTransferId().value()
+            );
+            ledgerRepository.post(entry);
+            log.debug("Posted fee ledger entry {} for account {} amount {}",
+                entry.id().value(),
+                event.chargedAccountId().value(),
+                event.feeAmount().format());
+        } catch (IllegalArgumentException duplicateOrInvalid) {
+            log.warn("Skipped duplicate/invalid fee ledger entry for transfer {}: {}",
+                event.relatedTransferId().value(), duplicateOrInvalid.getMessage());
+        } catch (Exception e) {
+            log.error("RECONCILIATION ALERT: failed to post fee ledger entry for transfer {} "
+                + "amount {} — fee was charged but ledger was not updated. "
+                + "Manual reconciliation required.",
+                event.relatedTransferId().value(), event.feeAmount().format(), e);
         }
     }
 }

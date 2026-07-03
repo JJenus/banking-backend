@@ -2,10 +2,13 @@ package com.jjenus.banking.transfers.application;
 
 import com.jjenus.bank.core.accounts.Account;
 import com.jjenus.bank.core.accounts.AccountId;
+import com.jjenus.bank.core.policy.FeePolicy;
 import com.jjenus.bank.core.ports.AccountRepository;
 import com.jjenus.bank.core.ports.TransferRepository;
 import com.jjenus.bank.core.shared.Money;
 import com.jjenus.bank.core.shared.Result;
+import com.jjenus.bank.core.transactions.Transaction;
+import com.jjenus.bank.core.transactions.TransactionId;
 import com.jjenus.bank.core.transfers.*;
 import com.jjenus.banking.shared.exception.ResourceNotFoundException;
 import com.jjenus.banking.transactions.infrastructure.TransactionRepository;
@@ -15,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Currency;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -39,6 +43,7 @@ public class TransferApplicationService {
     private final AccountRepository accountRepository;
     private final TransferRepository transferRepository;
     private final TransactionRepository transactionRepository;
+    private final FeePolicy feePolicy;
     private final ApplicationEventPublisher eventPublisher;
     private final RedisTemplate<String, String> redis;
 
@@ -48,11 +53,13 @@ public class TransferApplicationService {
     public TransferApplicationService(AccountRepository accountRepository,
                                       TransferRepository transferRepository,
                                       TransactionRepository transactionRepository,
+                                      FeePolicy feePolicy,
                                       ApplicationEventPublisher eventPublisher,
                                       RedisTemplate<String, String> redis) {
         this.accountRepository      = accountRepository;
         this.transferRepository     = transferRepository;
         this.transactionRepository  = transactionRepository;
+        this.feePolicy              = feePolicy;
         this.eventPublisher         = eventPublisher;
         this.redis                  = redis;
     }
@@ -110,20 +117,67 @@ public class TransferApplicationService {
 
         TransferService.TransferExecutionResult execution = result.getOrThrow();
 
-        // 5. Persist
-        accountRepository.update(execution.updatedFromAccount());
-        accountRepository.update(execution.updatedToAccount());
-        transferRepository.save(execution.transfer());
-        transactionRepository.saveAll(List.of(
+        // 5. Calculate and apply fee (if policy is non-zero)
+        //    Fee is charged to the sender on top of the transfer amount.
+        //    The fee deduction happens in the same DB transaction as the transfer,
+        //    so either both commit or both roll back.
+        Money transferAmount = Money.of(amount, currency);
+        Money feeAmount = feePolicy.calculateTransferFee(
+            execution.updatedFromAccount(), transferAmount);
+
+        Account finalFromAccount = execution.updatedFromAccount();
+        List<Transaction> transactions = new ArrayList<>(List.of(
             execution.debitTransaction(),
             execution.creditTransaction()
         ));
 
-        // 6. Cache idempotency key
+        Transaction feeTransaction = null;
+        if (feeAmount.isPositive()) {
+            // Guard: check sender has enough balance for the fee on top of the transfer
+            if (!finalFromAccount.hasSufficientFunds(feeAmount)) {
+                throw new IllegalStateException(String.format(
+                    "Insufficient balance for transfer fee of %s. " +
+                    "Post-transfer balance: %s. Please ensure your account has " +
+                    "enough funds to cover both the transfer amount and the applicable fee.",
+                    feeAmount.format(), finalFromAccount.balance().format()));
+            }
+
+            // Deduct fee from sender's post-transfer balance
+            finalFromAccount = finalFromAccount.withdraw(feeAmount);
+
+            feeTransaction = Transaction.createFee(
+                TransactionId.generate(),
+                fromAccount.id(),
+                feeAmount,
+                finalFromAccount.balance(),
+                "Transfer fee: " + feePolicy.description()
+            );
+            transactions.add(feeTransaction);
+        }
+
+        // 6. Persist — all writes in same transaction
+        accountRepository.update(finalFromAccount);
+        accountRepository.update(execution.updatedToAccount());
+        transferRepository.save(execution.transfer());
+        transactionRepository.saveAll(transactions);
+
+        // 7. Cache idempotency key
         redis.opsForValue().set(redisKey, execution.transfer().id().value(), IDEMPOTENCY_TTL);
 
-        // 7. Publish domain events (after transaction commits via Spring Modulith)
+        // 8. Publish domain events (fire after transaction commits via Spring Modulith)
+        //    If a fee was charged, also publish a FeeCharged event so the ledger
+        //    listener can post the matching FEE journal entry.
         execution.domainEvents().forEach(eventPublisher::publishEvent);
+        if (feeTransaction != null) {
+            eventPublisher.publishEvent(
+                new FeeChargedEvent(
+                    fromAccount.id(),
+                    feeAmount,
+                    execution.transfer().id(),
+                    feePolicy.description()
+                )
+            );
+        }
 
         return execution.transfer();
     }

@@ -1,5 +1,6 @@
 package com.jjenus.banking.transfers.api;
 
+import com.jjenus.bank.core.policy.FeePolicy;
 import com.jjenus.bank.core.transfers.Transfer;
 import com.jjenus.banking.shared.web.CurrentUser;
 import com.jjenus.banking.transfers.application.TransferApplicationService;
@@ -32,9 +33,12 @@ import java.util.List;
 public class TransferController {
 
     private final TransferApplicationService transferService;
+    private final FeePolicy feePolicy;
 
-    public TransferController(TransferApplicationService transferService) {
+    public TransferController(TransferApplicationService transferService,
+                              FeePolicy feePolicy) {
         this.transferService = transferService;
+        this.feePolicy       = feePolicy;
     }
 
     // ── Initiate transfer ─────────────────────────────────────────────────
@@ -113,6 +117,15 @@ public class TransferController {
         return TransferResponse.from(transferService.cancelTransfer(transferId, request.reason()));
     }
 
+    // ── Fee info ──────────────────────────────────────────────────────────
+
+    @GetMapping("/fee-info")
+    @Operation(summary = "Returns the active fee policy description — display to users before transfer")
+    @PreAuthorize("isAuthenticated()")
+    public FeePolicyInfo getFeeInfo() {
+        return new FeePolicyInfo(feePolicy.description());
+    }
+
     // ── Request / Response records ────────────────────────────────────────
 
     public record InitiateTransferRequest(
@@ -161,4 +174,6 @@ public class TransferController {
             );
         }
     }
+
+    public record FeePolicyInfo(String description) {}
 }
