@@ -176,9 +176,7 @@ GET    /v1/admin/audit/actor/{actorId}
 
 ## TODO (future sprints — not blocking launch)
 - Integration tests with Testcontainers (Postgres + Redis)
-- EventStore port adapter (optional — bank-core EventStore port, not yet needed)
-- FeePolicy wiring into TransferApplicationService
-- OverdraftPolicy configuration
+- EventStore port adapter (optional — bank-core EventStore port)
 - Paystack webhook handler for top-up flow
 - KYC document upload (S3/local storage)
 - HTTPS cert automation (Let's Encrypt via nginx)

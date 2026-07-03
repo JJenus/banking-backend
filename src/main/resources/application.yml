@@ -168,6 +168,15 @@ banking:
     # flat-amount: 50.00
     # fee-currency: NGN
 
+  # ── Overdraft policy ──────────────────────────────────────────────────────
+  # Controls whether accounts can go below zero on withdrawal.
+  # Options: NONE (default), FIXED_LIMIT
+  overdraft:
+    type: ${OVERDRAFT_POLICY_TYPE:NONE}
+    # Uncomment for FIXED_LIMIT (allow up to ₦5,000 overdraft per account):
+    # limit-amount: 5000.00
+    # limit-currency: NGN
+
   notifications:
     from-name: ${NOTIFICATION_FROM_NAME:Banking Services}
     support-email: ${SUPPORT_EMAIL:support@banking.local}

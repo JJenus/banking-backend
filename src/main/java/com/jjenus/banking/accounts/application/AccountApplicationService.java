@@ -1,6 +1,7 @@
 package com.jjenus.banking.accounts.application;
 
 import com.jjenus.bank.core.accounts.*;
+import com.jjenus.bank.core.policy.OverdraftPolicy;
 import com.jjenus.bank.core.ports.AccountRepository;
 import com.jjenus.bank.core.shared.Money;
 import com.jjenus.bank.core.shared.Result;
@@ -42,15 +43,18 @@ public class AccountApplicationService implements AccountQueryApi {
     private final AccountRepository accountRepository;
     private final AccountOwnerDirectory ownerDirectory;
     private final TransactionRepository transactionRepository;
+    private final OverdraftPolicy overdraftPolicy;
     private final ApplicationEventPublisher eventPublisher;
 
     public AccountApplicationService(AccountRepository accountRepository,
                                      AccountOwnerDirectory ownerDirectory,
                                      TransactionRepository transactionRepository,
+                                     OverdraftPolicy overdraftPolicy,
                                      ApplicationEventPublisher eventPublisher) {
         this.accountRepository      = accountRepository;
         this.ownerDirectory         = ownerDirectory;
         this.transactionRepository  = transactionRepository;
+        this.overdraftPolicy        = overdraftPolicy;
         this.eventPublisher         = eventPublisher;
     }
 
@@ -119,14 +123,43 @@ public class AccountApplicationService implements AccountQueryApi {
     /**
      * Withdraws money from an account.
      */
+    /**
+     * Withdraws money from an account, honouring the active {@link OverdraftPolicy}.
+     *
+     * <p>If the withdrawal amount exceeds the available balance:
+     * <ol>
+     *   <li>The overdraft policy is consulted with the shortfall amount.</li>
+     *   <li>If allowed, the withdrawal proceeds — the account balance goes negative.</li>
+     *   <li>If not allowed, an insufficient-funds error is thrown.</li>
+     * </ol>
+     *
+     * <p>For overdraft withdrawals, bank-core's {@code Account.withdraw()} is
+     * bypassed for the balance check (since it hard-rejects negative balances),
+     * but the resulting domain objects (updated account, event, transaction) are
+     * constructed consistently using bank-core types.
+     */
     public Account withdraw(String accountId, Money amount, String reference) {
         Account account = accountRepository.getById(AccountId.of(accountId));
 
+        boolean needsOverdraft = !account.hasSufficientFunds(amount);
+
+        if (needsOverdraft) {
+            Money shortfall = amount.subtract(account.balance());
+            if (!overdraftPolicy.allowsOverdraft(account, shortfall)) {
+                throw new IllegalStateException(String.format(
+                    "Insufficient funds: balance is %s, attempting to withdraw %s. " +
+                    "No overdraft facility is available on this account.",
+                    account.balance().format(), amount.format()));
+            }
+            // Overdraft permitted — execute directly bypassing bank-core's balance guard
+            return executeOverdraftWithdrawal(account, amount, reference);
+        }
+
+        // Normal path — sufficient balance, delegate to bank-core
         AccountCommand.WithdrawMoney command =
             AccountCommand.WithdrawMoney.now(account.id(), amount, reference);
 
         Result<AccountService.WithdrawalResult> result = AccountService.withdraw(account, command);
-
         if (result.isFailure()) {
             throw new IllegalStateException(result.getErrorOrNull());
         }
@@ -137,6 +170,47 @@ public class AccountApplicationService implements AccountQueryApi {
         eventPublisher.publishEvent(withdrawal.event());
 
         return withdrawal.updatedAccount();
+    }
+
+    /**
+     * Executes a withdrawal that takes the account into negative territory
+     * (overdraft). Bypasses bank-core's sufficient-funds guard but constructs
+     * all resulting domain objects using bank-core types for consistency.
+     */
+    private Account executeOverdraftWithdrawal(Account account, Money amount, String reference) {
+        // Manually compute new balance (negative)
+        Money newBalance = account.balance().subtract(amount);
+
+        // Build updated account with negative balance directly
+        Account updatedAccount = new Account(
+            account.id(),
+            account.customerId(),
+            newBalance,
+            account.status(),
+            account.createdAt(),
+            java.time.Instant.now(),
+            account.version() + 1
+        );
+
+        // Create the withdrawal transaction using bank-core's factory
+        com.jjenus.bank.core.transactions.Transaction transaction =
+            com.jjenus.bank.core.transactions.Transaction.createWithdrawal(
+                com.jjenus.bank.core.transactions.TransactionId.generate(),
+                account.id(),
+                amount,
+                newBalance,
+                reference
+            );
+
+        // Build the MoneyWithdrawn event using bank-core's factory
+        AccountEvent.MoneyWithdrawn event = AccountEvent.moneyWithdrawn(
+            account.id(), amount, reference);
+
+        accountRepository.update(updatedAccount);
+        transactionRepository.save(transaction);
+        eventPublisher.publishEvent(event);
+
+        return updatedAccount;
     }
 
     /**
