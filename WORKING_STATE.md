@@ -19,13 +19,47 @@ Flyway 10 · Thymeleaf · OpenPDF (com.lowagie.text) · springdoc-openapi
 | identity      | c.j.b.identity                   | IdentityQueryApi         | /v1/identity              |
 | accounts      | c.j.b.accounts                   | AccountQueryApi          | /v1/accounts              |
 | transfers     | c.j.b.transfers                  | (events only)            | /v1/transfers             |
-| transactions  | c.j.b.transactions               | TransactionRepository    | (no controller, read only)|
+| transactions  | c.j.b.transactions               | TransactionRepository    | (no controller)           |
 | ledger        | c.j.b.ledger                     | LedgerQueryApi           | /v1/ledger                |
-| notifications | c.j.b.notifications              | (event-driven, no API)   | —                         |
-| audit         | c.j.b.audit                      | (event-driven, no API)   | —                         |
+| notifications | c.j.b.notifications              | (event-driven)           | —                         |
+| audit         | c.j.b.audit                      | (event-driven)           | —                         |
 | reporting     | c.j.b.reporting                  | ReportingApplicationSvc  | /v1/reporting             |
 | admin         | c.j.b.admin                      | (REST only)              | /v1/admin                 |
+| sse           | c.j.b.sse                        | (event-driven + stream)  | /v1/events                |
 | shared        | c.j.b.shared                     | —                        | —                         |
+
+## SSE module (d5a613f)
+- SseEmitterRegistry — ConcurrentHashMap<ownerId, List<SseEmitter>>, multi-tab support
+- SseHeartbeatScheduler — @Scheduled every 30s, comment to prevent proxy timeouts
+- SseEventDispatcher — @ApplicationModuleListener for all domain events, resolves ownerId via AccountQueryApi
+- SseController — GET /v1/events/stream (5min timeout, CONNECTED on open), GET /v1/events/stats (ADMIN)
+- AsyncConfig — ThreadPoolTaskExecutor (core=4, max=16, queue=100)
+- @EnableScheduling added to BankingApplication
+
+SSE event types: TRANSACTION_CREATED, BALANCE_UPDATED, TRANSFER_COMPLETED,
+TRANSFER_REVERSED, ACCOUNT_STATUS_CHANGED, KYC_STATUS_CHANGED, FEE_CHARGED
+
+Frontend: use @microsoft/fetch-event-source (supports Authorization header)
+
+## Fee matrix (c8886e5)
+- FeeScheduleProperties — @ConfigurationProperties, three nested slots
+- FeeSchedule — record(intrabankTransfer, outgoingTransfer, withdrawal)
+  forTransfer(boolean intrabank) selects policy at runtime
+  summary() → FeeSummary{intrabankTransfer, outgoingTransfer, withdrawal}
+- FeePolicyConfig — builds FeeSchedule from config, logs each slot at startup
+- TransferApplicationService — detects intrabank via accountRepository.existsById()
+- AccountApplicationService — applyWithdrawalFee() after every withdrawal
+- GET /v1/transfers/fee-info → FeeSchedule.FeeSummary (all three descriptions)
+
+Fee env vars: FEE_INTRABANK, FEE_OUTGOING, FEE_WITHDRAWAL (all default NONE)
+Fee policy types per slot: NONE | PERCENTAGE | FLAT | NIGERIAN_INTERBANK
+
+## TODO (future sprints)
+- Integration tests with Testcontainers
+- EventStore port adapter
+- Paystack webhook handler for top-up
+- KYC document upload
+- HTTPS cert automation
 
 ## All committed features
 1. Scaffold — pom, configs, SecurityConfig, BankingProperties, GlobalExceptionHandler,
