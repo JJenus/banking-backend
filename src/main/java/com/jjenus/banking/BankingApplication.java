@@ -29,6 +29,7 @@ import org.springframework.scheduling.annotation.EnableAsync;
 @ConfigurationPropertiesScan
 @EnableCaching
 @EnableAsync
+@org.springframework.scheduling.annotation.EnableScheduling
 public class BankingApplication {
 
     public static void main(String[] args) {

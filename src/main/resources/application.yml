@@ -183,6 +183,17 @@ banking:
     # limit-amount: 5000.00
     # limit-currency: NGN
 
+  # ── SSE (Server-Sent Events) ─────────────────────────────────────────────
+  sse:
+    # Emitter timeout in milliseconds. Clients reconnect automatically.
+    timeout-ms: ${SSE_TIMEOUT_MS:300000}   # 5 minutes
+
+  # ── Async executor (used by @Async — email, SSE dispatch) ─────────────────
+  async:
+    core-pool-size: 4
+    max-pool-size: 16
+    queue-capacity: 100
+
   notifications:
     from-name: ${NOTIFICATION_FROM_NAME:Banking Services}
     support-email: ${SUPPORT_EMAIL:support@banking.local}
