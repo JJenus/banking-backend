@@ -11,94 +11,72 @@ import org.springframework.context.annotation.Configuration;
 import java.util.Currency;
 
 /**
- * Spring configuration that exposes a {@link FeePolicy} bean based on
- * the {@code banking.fees.*} properties in {@code application.yml}.
- *
- * <p>Inject {@code FeePolicy feePolicy} wherever fees need to be calculated.
- * Currently wired into {@link com.jjenus.banking.transfers.application.TransferApplicationService}.
- *
- * <p>Changing the fee policy requires only a config change and a restart —
- * no code change needed.
- *
- * <p>Example configurations:
- * <pre>
- * # No fee (default / development)
- * banking.fees.type: NONE
- *
- * # Nigerian interbank style (0.1%, min ₦10, max ₦2,000)
- * banking.fees.type: NIGERIAN_INTERBANK
- *
- * # Custom percentage (0.5%, min ₦50, max ₦5,000)
- * banking.fees.type: PERCENTAGE
- * banking.fees.rate: 0.005
- * banking.fees.min-amount: 50.00
- * banking.fees.max-amount: 5000.00
- * banking.fees.fee-currency: NGN
- *
- * # Flat fee (₦100 per transfer)
- * banking.fees.type: FLAT
- * banking.fees.flat-amount: 100.00
- * banking.fees.fee-currency: NGN
- * </pre>
+ * Builds a {@link FeeSchedule} bean from the {@code banking.fees.*}
+ * configuration, containing three independent {@link FeePolicy} instances:
+ * one for intrabank transfers, one for outgoing transfers, and one for
+ * withdrawals.
  */
 @Configuration
-@EnableConfigurationProperties(FeePolicyProperties.class)
+@EnableConfigurationProperties(FeeScheduleProperties.class)
 public class FeePolicyConfig {
 
     private static final Logger log = LoggerFactory.getLogger(FeePolicyConfig.class);
 
     @Bean
-    public FeePolicy feePolicy(FeePolicyProperties props) {
-        FeePolicy policy = switch (props.effectiveType()) {
+    public FeeSchedule feeSchedule(FeeScheduleProperties props) {
+        FeePolicy intrabank  = build("intrabank-transfer",  props.intrabankTransferSafe());
+        FeePolicy outgoing   = build("outgoing-transfer",   props.outgoingTransferSafe());
+        FeePolicy withdrawal = build("withdrawal",          props.withdrawalSafe());
+        return new FeeSchedule(intrabank, outgoing, withdrawal);
+    }
+
+    private FeePolicy build(String label, FeePolicyProperties slot) {
+        FeePolicy policy = switch (slot.effectiveType()) {
 
             case NONE -> {
-                log.info("Fee policy: NONE (all transfers are free)");
+                log.info("Fee[{}]: NONE", label);
                 yield FeePolicy.none();
             }
 
             case NIGERIAN_INTERBANK -> {
-                log.info("Fee policy: NIGERIAN_INTERBANK (0.1%, min NGN 10, max NGN 2,000)");
+                log.info("Fee[{}]: NIGERIAN_INTERBANK (0.1%, min NGN 10, max NGN 2,000)", label);
                 yield FeePolicy.nigerianInterbank();
             }
 
             case PERCENTAGE -> {
-                requireField(props.rate(),       "banking.fees.rate");
-                requireField(props.minAmount(),  "banking.fees.min-amount");
-                requireField(props.maxAmount(),  "banking.fees.max-amount");
-                requireField(props.feeCurrency(),"banking.fees.fee-currency");
+                require(slot.rate(),       label, "rate");
+                require(slot.minAmount(),  label, "min-amount");
+                require(slot.maxAmount(),  label, "max-amount");
+                require(slot.feeCurrency(), label, "fee-currency");
 
-                Currency currency = Currency.getInstance(props.feeCurrency());
-                Money min = Money.of(props.minAmount().toPlainString(), currency);
-                Money max = Money.of(props.maxAmount().toPlainString(), currency);
-
-                log.info("Fee policy: PERCENTAGE {}% (min {}, max {})",
-                    props.rate().multiply(java.math.BigDecimal.valueOf(100))
-                         .stripTrailingZeros().toPlainString(),
+                Currency currency = Currency.getInstance(slot.feeCurrency());
+                Money min = Money.of(slot.minAmount().toPlainString(), currency);
+                Money max = Money.of(slot.maxAmount().toPlainString(), currency);
+                log.info("Fee[{}]: PERCENTAGE {}% (min {}, max {})", label,
+                    slot.rate().multiply(java.math.BigDecimal.valueOf(100))
+                               .stripTrailingZeros().toPlainString(),
                     min.format(), max.format());
-
-                yield FeePolicy.percentage(props.rate(), min, max);
+                yield FeePolicy.percentage(slot.rate(), min, max);
             }
 
             case FLAT -> {
-                requireField(props.flatAmount(), "banking.fees.flat-amount");
-                requireField(props.feeCurrency(),"banking.fees.fee-currency");
+                require(slot.flatAmount(),  label, "flat-amount");
+                require(slot.feeCurrency(), label, "fee-currency");
 
-                Currency currency = Currency.getInstance(props.feeCurrency());
-                Money flat = Money.of(props.flatAmount().toPlainString(), currency);
-
-                log.info("Fee policy: FLAT {}", flat.format());
+                Currency currency = Currency.getInstance(slot.feeCurrency());
+                Money flat = Money.of(slot.flatAmount().toPlainString(), currency);
+                log.info("Fee[{}]: FLAT {}", label, flat.format());
                 yield FeePolicy.flat(flat);
             }
         };
-
         return policy;
     }
 
-    private static void requireField(Object value, String propertyKey) {
+    private static void require(Object value, String label, String field) {
         if (value == null) {
             throw new IllegalStateException(
-                "Missing required fee policy property: " + propertyKey +
-                ". Check banking.fees.* in application.yml.");
+                "Missing required fee property for [" + label + "]: banking.fees."
+                + label + "." + field);
         }
     }
 }

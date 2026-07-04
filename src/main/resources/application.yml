@@ -148,25 +148,31 @@ banking:
   idempotency:
     ttl-hours: 24               # How long idempotency keys are cached in Redis
 
-  # ── Fee policy ────────────────────────────────────────────────────────────
-  # Controls the FeePolicy bean wired into TransferApplicationService.
-  # Change type and restart — no code change required.
+  # ── Fee schedule ─────────────────────────────────────────────────────────
+  # Three independently configurable fee contexts.
+  # Each slot supports: NONE, PERCENTAGE, FLAT, NIGERIAN_INTERBANK.
+  # Restart the app after any change.
   #
-  # Options:
-  #   NONE              — no fee (default; use in development/staging)
-  #   NIGERIAN_INTERBANK — 0.1%, min NGN 10, max NGN 2,000
-  #   PERCENTAGE        — custom rate with min/max caps (requires rate, min-amount, max-amount, fee-currency)
-  #   FLAT              — fixed fee per transfer (requires flat-amount, fee-currency)
+  # intrabank-transfer: sender and receiver are both accounts on this system
+  # outgoing-transfer:  receiver is external (Paystack/NIBSS destination)
+  # withdrawal:         cash withdrawal from an account
   fees:
-    type: ${FEE_POLICY_TYPE:NONE}
-    # Uncomment and set for PERCENTAGE policy:
-    # rate: 0.001
-    # min-amount: 10.00
-    # max-amount: 2000.00
-    # fee-currency: NGN
-    # Uncomment and set for FLAT policy:
-    # flat-amount: 50.00
-    # fee-currency: NGN
+    intrabank-transfer:
+      type: ${FEE_INTRABANK:NONE}
+      # Example — flat ₦10:
+      # type: FLAT
+      # flat-amount: 10.00
+      # fee-currency: NGN
+    outgoing-transfer:
+      type: ${FEE_OUTGOING:NONE}
+      # Example — Nigerian interbank (0.1%, min ₦10, max ₦2,000):
+      # type: NIGERIAN_INTERBANK
+    withdrawal:
+      type: ${FEE_WITHDRAWAL:NONE}
+      # Example — flat ₦20:
+      # type: FLAT
+      # flat-amount: 20.00
+      # fee-currency: NGN
 
   # ── Overdraft policy ──────────────────────────────────────────────────────
   # Controls whether accounts can go below zero on withdrawal.

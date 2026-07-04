@@ -11,6 +11,7 @@ import com.jjenus.bank.core.transactions.Transaction;
 import com.jjenus.bank.core.transactions.TransactionId;
 import com.jjenus.bank.core.transfers.*;
 import com.jjenus.banking.shared.exception.ResourceNotFoundException;
+import com.jjenus.banking.shared.policy.FeeSchedule;
 import com.jjenus.banking.transactions.infrastructure.TransactionRepository;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -43,7 +44,7 @@ public class TransferApplicationService {
     private final AccountRepository accountRepository;
     private final TransferRepository transferRepository;
     private final TransactionRepository transactionRepository;
-    private final FeePolicy feePolicy;
+    private final FeeSchedule feeSchedule;
     private final ApplicationEventPublisher eventPublisher;
     private final RedisTemplate<String, String> redis;
 
@@ -53,13 +54,13 @@ public class TransferApplicationService {
     public TransferApplicationService(AccountRepository accountRepository,
                                       TransferRepository transferRepository,
                                       TransactionRepository transactionRepository,
-                                      FeePolicy feePolicy,
+                                      FeeSchedule feeSchedule,
                                       ApplicationEventPublisher eventPublisher,
                                       RedisTemplate<String, String> redis) {
         this.accountRepository      = accountRepository;
         this.transferRepository     = transferRepository;
         this.transactionRepository  = transactionRepository;
-        this.feePolicy              = feePolicy;
+        this.feeSchedule            = feeSchedule;
         this.eventPublisher         = eventPublisher;
         this.redis                  = redis;
     }
@@ -117,12 +118,13 @@ public class TransferApplicationService {
 
         TransferService.TransferExecutionResult execution = result.getOrThrow();
 
-        // 5. Calculate and apply fee (if policy is non-zero)
-        //    Fee is charged to the sender on top of the transfer amount.
-        //    The fee deduction happens in the same DB transaction as the transfer,
-        //    so either both commit or both roll back.
+        // 5. Calculate and apply fee — intrabank vs outgoing rate
+        //    Intrabank: toAccountId exists in banking.accounts (same system)
+        //    Outgoing:  toAccountId is external (will route via Paystack/NIBSS)
         Money transferAmount = Money.of(amount, currency);
-        Money feeAmount = feePolicy.calculateTransferFee(
+        boolean intrabank = accountRepository.existsById(toAccount.id());
+        FeePolicy activePolicy = feeSchedule.forTransfer(intrabank);
+        Money feeAmount = activePolicy.calculateTransferFee(
             execution.updatedFromAccount(), transferAmount);
 
         Account finalFromAccount = execution.updatedFromAccount();
@@ -150,7 +152,7 @@ public class TransferApplicationService {
                 fromAccount.id(),
                 feeAmount,
                 finalFromAccount.balance(),
-                "Transfer fee: " + feePolicy.description()
+                "Transfer fee: " + activePolicy.description()
             );
             transactions.add(feeTransaction);
         }
@@ -165,8 +167,6 @@ public class TransferApplicationService {
         redis.opsForValue().set(redisKey, execution.transfer().id().value(), IDEMPOTENCY_TTL);
 
         // 8. Publish domain events (fire after transaction commits via Spring Modulith)
-        //    If a fee was charged, also publish a FeeCharged event so the ledger
-        //    listener can post the matching FEE journal entry.
         execution.domainEvents().forEach(eventPublisher::publishEvent);
         if (feeTransaction != null) {
             eventPublisher.publishEvent(
@@ -174,7 +174,7 @@ public class TransferApplicationService {
                     fromAccount.id(),
                     feeAmount,
                     execution.transfer().id(),
-                    feePolicy.description()
+                    activePolicy.description()
                 )
             );
         }

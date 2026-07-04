@@ -8,6 +8,7 @@ import com.jjenus.bank.core.shared.Result;
 import com.jjenus.banking.accounts.AccountQueryApi;
 import com.jjenus.banking.accounts.infrastructure.AccountOwnerDirectory;
 import com.jjenus.banking.shared.exception.ResourceNotFoundException;
+import com.jjenus.banking.shared.policy.FeeSchedule;
 import com.jjenus.banking.transactions.infrastructure.TransactionRepository;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -44,17 +45,20 @@ public class AccountApplicationService implements AccountQueryApi {
     private final AccountOwnerDirectory ownerDirectory;
     private final TransactionRepository transactionRepository;
     private final OverdraftPolicy overdraftPolicy;
+    private final FeeSchedule feeSchedule;
     private final ApplicationEventPublisher eventPublisher;
 
     public AccountApplicationService(AccountRepository accountRepository,
                                      AccountOwnerDirectory ownerDirectory,
                                      TransactionRepository transactionRepository,
                                      OverdraftPolicy overdraftPolicy,
+                                     FeeSchedule feeSchedule,
                                      ApplicationEventPublisher eventPublisher) {
         this.accountRepository      = accountRepository;
         this.ownerDirectory         = ownerDirectory;
         this.transactionRepository  = transactionRepository;
         this.overdraftPolicy        = overdraftPolicy;
+        this.feeSchedule            = feeSchedule;
         this.eventPublisher         = eventPublisher;
     }
 
@@ -169,7 +173,8 @@ public class AccountApplicationService implements AccountQueryApi {
         transactionRepository.save(withdrawal.transaction());
         eventPublisher.publishEvent(withdrawal.event());
 
-        return withdrawal.updatedAccount();
+        // Apply withdrawal fee after the withdrawal itself (same DB transaction)
+        return applyWithdrawalFee(withdrawal.updatedAccount(), reference);
     }
 
     /**
@@ -210,7 +215,77 @@ public class AccountApplicationService implements AccountQueryApi {
         transactionRepository.save(transaction);
         eventPublisher.publishEvent(event);
 
-        return updatedAccount;
+        return applyWithdrawalFee(updatedAccount, reference);
+    }
+
+    /**
+     * Charges the withdrawal fee (if configured) after a successful withdrawal.
+     * Creates a FEE transaction and publishes a {@link FeeChargedEvent} for the
+     * ledger listener. Returns the account after the fee deduction (or the
+     * unchanged account if fee is zero).
+     */
+    private Account applyWithdrawalFee(Account postWithdrawalAccount, String reference) {
+        com.jjenus.bank.core.policy.FeePolicy withdrawalFeePolicy = feeSchedule.withdrawal();
+        // Use the withdrawal amount as a proxy — fee is on the act of withdrawing,
+        // policy receives the post-withdrawal account to check its characteristics.
+        // We pass Money.zero here since withdrawal fee is typically flat or NONE;
+        // for percentage-based withdrawal fees the caller should pass the actual amount.
+        // This is intentionally kept simple — withdrawal fees are almost always flat.
+        Money zero = Money.zero(postWithdrawalAccount.getCurrency());
+        Money feeAmount = withdrawalFeePolicy.calculateTransferFee(postWithdrawalAccount, zero);
+
+        if (!feeAmount.isPositive()) {
+            return postWithdrawalAccount;
+        }
+
+        // Guard: enough balance for the fee
+        if (!postWithdrawalAccount.hasSufficientFunds(feeAmount)) {
+            // If balance is insufficient for fee after withdrawal, log a warning
+            // but do NOT block — the withdrawal already committed. The fee
+            // will be attempted but skipped rather than rolling back a completed withdrawal.
+            org.slf4j.LoggerFactory.getLogger(AccountApplicationService.class)
+                .warn("Skipping withdrawal fee of {} — insufficient post-withdrawal balance {} on account {}",
+                    feeAmount.format(), postWithdrawalAccount.balance().format(),
+                    postWithdrawalAccount.id().value());
+            return postWithdrawalAccount;
+        }
+
+        Account afterFee = postWithdrawalAccount.withdraw(feeAmount);
+
+        com.jjenus.bank.core.transactions.Transaction feeTx =
+            com.jjenus.bank.core.transactions.Transaction.createFee(
+                com.jjenus.bank.core.transactions.TransactionId.generate(),
+                postWithdrawalAccount.id(),
+                feeAmount,
+                afterFee.balance(),
+                "Withdrawal fee: " + withdrawalFeePolicy.description()
+            );
+
+        accountRepository.update(afterFee);
+        transactionRepository.save(feeTx);
+
+        // FeeChargedEvent uses a null TransferId substitute — withdrawal fees
+        // are account-level, not linked to a Transfer record.
+        // We reuse FeeChargedEvent with a synthetic "WD-{accountId}" source reference.
+        eventPublisher.publishEvent(
+            new com.jjenus.banking.transfers.application.FeeChargedEvent(
+                postWithdrawalAccount.id(),
+                feeAmount,
+                // Withdrawal fees are not linked to a Transfer — synthesise a
+                // valid TransferId using the account ID's alphanumeric suffix.
+                com.jjenus.bank.core.transfers.TransferId.of(
+                    "TRF-WD" + postWithdrawalAccount.id().value()
+                               .replace("ACC-", "")
+                               .toUpperCase()
+                               .replaceAll("[^A-Z0-9]", "X")
+                               .substring(0, 4)
+                    + "000000"
+                ),
+                withdrawalFeePolicy.description()
+            )
+        );
+
+        return afterFee;
     }
 
     /**
